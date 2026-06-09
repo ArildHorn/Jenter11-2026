@@ -18,10 +18,8 @@
   <div id="root"><div id="loading">⚽ Laster J11 Trener...</div></div>
   <script type="text/babel">
 const { useState, useEffect, useRef } = React;
-
 const SUPABASE_URL = "https://jowlnltfepmcbwrphkwv.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impvd2xubHRmZXBtY2J3cnBoa3d2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjc5NDYsImV4cCI6MjA5NjYwMzk0Nn0.fj8ECv7rzpx_u3O0lNTwqs9zQJyIYmoDtcVIgbfjZaQ";
-
 const db = {
   async get(id) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/j11_data?id=eq.${id}&select=data`, {
@@ -33,17 +31,11 @@ const db = {
   async set(id, data) {
     await fetch(`${SUPABASE_URL}/rest/v1/j11_data`, {
       method: "POST",
-      headers: {
-        apikey: SUPABASE_KEY,
-        Authorization: `Bearer ${SUPABASE_KEY}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates"
-      },
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json", Prefer: "resolution=merge-duplicates" },
       body: JSON.stringify({ id, data, updated_at: new Date().toISOString() })
     });
   }
 };
-
 
 // New positions with colour coding
 const ALL_POSITIONS = ["Keeper","V. Back","H. Back","V. Kant","H. Kant","Sentral midt","Angriper"];
@@ -288,14 +280,33 @@ function App() {
   const [sessions, setSessions] = useState(() => load("j11_sessions", []));
   const [dbReady, setDbReady] = useState(false);
 
-  // Load from Supabase on startup
+  // Load from Supabase on startup — also restore live session if one was running
   useEffect(() => {
     const loadFromDb = async () => {
       try {
         const p = await db.get("players");
         const s = await db.get("sessions");
+        const live = await db.get("live");
         if (p) setPlayers(p);
         if (s) setSessions(s);
+        // Restore active session if one was running
+        if (live && live.view === "session") {
+          setView("session");
+          setSessionStartTime(live.sessionStartTime || null);
+          setPausedAt(live.pausedAt || 0);
+          // Compute current timer
+          let currentTimer = live.timer || 0;
+          if (live.running && live.sessionStartTime) {
+            currentTimer = Math.floor((Date.now() - live.sessionStartTime) / 1000) + (live.pausedAt || 0);
+          }
+          setTimer(currentTimer);
+          setRunning(live.running || false);
+          setEvents(live.events || []);
+          setNotes(live.notes || []);
+          setScore(live.score || { home:0, away:0 });
+          setOpponent(live.opponent || "");
+          if (live.players) setPlayers(live.players);
+        }
       } catch(e) { console.error("DB load failed", e); }
       setDbReady(true);
     };
@@ -322,15 +333,21 @@ function App() {
   const [opponent, setOpponent] = useState("");
   const [score, setScore] = useState({ home:0, away:0 });
   const [setupTab, setSetupTab] = useState("ny");
-  const [isViewer, setIsViewer] = useState(false); // viewer = read-only live mode
+  const [sessionStartTime, setSessionStartTime] = useState(null); // timestamp when session started
+  const [pausedAt, setPausedAt] = useState(0); // accumulated paused seconds
   const intervalRef = useRef(null);
   const pollRef = useRef(null);
 
   // Auto-save to Supabase handled above
 
-  // Save live session state so viewers can follow
   const saveLiveState = (extra = {}) => {
-    db.set("live", { view, timer, running, players, events, notes, score, opponent, sessionType, ...extra });
+    db.set("live", {
+      view: "session", running, players, events, notes,
+      score, opponent, sessionType,
+      sessionStartTime, pausedAt,
+      timer,
+      ...extra
+    });
   };
 
   // Poll live state for viewers every 3 seconds
@@ -340,9 +357,14 @@ function App() {
       try {
         const live = await db.get("live");
         if (live) {
-          setTimer(live.timer || 0);
+          // Compute current timer from startTime if running
+          let currentTimer = live.timer || 0;
+          if (live.running && live.sessionStartTime) {
+            currentTimer = Math.floor((Date.now() - live.sessionStartTime) / 1000) + (live.pausedAt || 0);
+          }
+          setTimer(currentTimer);
           setRunning(live.running || false);
-          setPlayers(live.players || []);
+          if (live.players) setPlayers(live.players);
           setEvents(live.events || []);
           setNotes(live.notes || []);
           setScore(live.score || { home:0, away:0 });
@@ -351,44 +373,61 @@ function App() {
         }
       } catch(e) {}
     };
-    poll();
+    poll(); // load immediately
     pollRef.current = setInterval(poll, 3000);
     return () => clearInterval(pollRef.current);
   }, [isViewer]);
 
   useEffect(() => {
-    if (running) intervalRef.current = setInterval(() => {
-      setTimer(t => {
-        const newT = t + 1;
-        if (newT % 5 === 0) saveLiveState({ timer: newT });
-        return newT;
-      });
-    }, 1000);
-    else clearInterval(intervalRef.current);
+    if (running && sessionStartTime) {
+      intervalRef.current = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000) + pausedAt;
+        setTimer(elapsed);
+        if (elapsed % 10 === 0) {
+          setPlayers(prev => {
+            db.set("live", { view:"session", running:true, players:prev, events, notes, score, opponent, sessionType, sessionStartTime, pausedAt, timer:elapsed });
+            return prev;
+          });
+        }
+      }, 1000);
+    } else {
+      clearInterval(intervalRef.current);
+    }
     return () => clearInterval(intervalRef.current);
-  }, [running]);
+  }, [running, sessionStartTime, pausedAt]);
 
   const startSession = () => {
     const now = Date.now();
     const newPlayers = players.map(p => p.active ? {...p, sessionStart:now, roleStart:now} : p);
     setPlayers(newPlayers);
     setRunning(true); setView("session"); setTimer(0);
+    setSessionStartTime(now); setPausedAt(0);
     const newEvents = [{ time:0, text:`${sessionType==="kamp"?"⚽ Kamp":"🏃 Trening"} startet!` }];
-    setEvents(newEvents);
-    setTimeout(() => db.set("live", { view:"session", timer:0, running:true, players:newPlayers, events:newEvents, notes:[], score, opponent, sessionType }), 100);
+    setEvents(newEvents); setNotes([]);
+    setTimeout(() => db.set("live", {
+      view:"session", running:true, players:newPlayers, events:newEvents, notes:[],
+      score, opponent, sessionType, sessionStartTime:now, pausedAt:0, timer:0
+    }), 100);
   };
 
   const pauseResume = () => {
     const now = Date.now();
     if (running) {
+      const elapsed = Math.floor((now - sessionStartTime) / 1000) + pausedAt;
+      setPausedAt(elapsed);
+      setSessionStartTime(null);
       setPlayers(prev => prev.map(p => {
         if (!p.active || !p.sessionStart) return p;
-        const gained = Math.floor((now-p.sessionStart)/1000);
+        const gained = Math.floor((now - p.sessionStart) / 1000);
         const f = flushRole(p, now);
-        return {...f, totalTime:f.totalTime+gained, sessionStart:null, roleStart:null};
+        return {...f, totalTime: f.totalTime + gained, sessionStart: null, roleStart: null};
       }));
+      db.set("live", { view:"session", running:false, players, events, notes, score, opponent, sessionType, sessionStartTime:null, pausedAt: Math.floor((now - sessionStartTime) / 1000) + pausedAt, timer });
     } else {
+      const newStart = now;
+      setSessionStartTime(newStart);
       setPlayers(prev => prev.map(p => p.active ? {...p, sessionStart:now, roleStart:now} : p));
+      db.set("live", { view:"session", running:true, players, events, notes, score, opponent, sessionType, sessionStartTime:newStart, pausedAt, timer });
     }
     setRunning(r => !r);
   };
@@ -431,16 +470,25 @@ function App() {
       setEvents(prev => [{time:timer, text:`🔄 ${inName} inn for ${outName} (${outPos})`}, ...prev]);
     }
     setSubMode(null);
+    // Save live state after sub
+    setTimeout(() => setPlayers(prev => {
+      db.set("live", { view:"session", running, players:prev, events, notes, score, opponent, sessionType, sessionStartTime, pausedAt, timer });
+      return prev;
+    }), 150);
   };
 
   const changePosition = (playerId, newPos) => {
     const now = Date.now();
     const pl = players.find(p=>p.id===playerId);
-    setPlayers(prev => prev.map(p => {
-      if (p.id!==playerId) return p;
-      const f = flushRole(p, now);
-      return {...f, position:newPos, roleStart:now};
-    }));
+    setPlayers(prev => {
+      const updated = prev.map(p => {
+        if (p.id!==playerId) return p;
+        const f = flushRole(p, now);
+        return {...f, position:newPos, roleStart:now};
+      });
+      db.set("live", { view:"session", running, players:updated, events, notes, score, opponent, sessionType, sessionStartTime, pausedAt, timer });
+      return updated;
+    });
     if (view==="session")
       setEvents(prev => [{time:timer, text:`📋 ${pl?.name}: ${pl?.position} → ${newPos}`}, ...prev]);
   };
@@ -932,7 +980,6 @@ const s = {
   roleDot: { width:8, height:8, borderRadius:"50%", flexShrink:0 },
   empty: { color:"#475569", fontSize:13, textAlign:"center", padding:"12px 0" },
 };
-
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode><App /></React.StrictMode>
 );
