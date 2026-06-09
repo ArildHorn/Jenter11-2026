@@ -322,21 +322,60 @@ function App() {
   const [opponent, setOpponent] = useState("");
   const [score, setScore] = useState({ home:0, away:0 });
   const [setupTab, setSetupTab] = useState("ny");
+  const [isViewer, setIsViewer] = useState(false); // viewer = read-only live mode
   const intervalRef = useRef(null);
+  const pollRef = useRef(null);
 
   // Auto-save to Supabase handled above
 
+  // Save live session state so viewers can follow
+  const saveLiveState = (extra = {}) => {
+    db.set("live", { view, timer, running, players, events, notes, score, opponent, sessionType, ...extra });
+  };
+
+  // Poll live state for viewers every 3 seconds
   useEffect(() => {
-    if (running) intervalRef.current = setInterval(() => setTimer(t => t+1), 1000);
+    if (!isViewer) return;
+    const poll = async () => {
+      try {
+        const live = await db.get("live");
+        if (live) {
+          setTimer(live.timer || 0);
+          setRunning(live.running || false);
+          setPlayers(live.players || []);
+          setEvents(live.events || []);
+          setNotes(live.notes || []);
+          setScore(live.score || { home:0, away:0 });
+          setOpponent(live.opponent || "");
+          setView(live.view || "setup");
+        }
+      } catch(e) {}
+    };
+    poll();
+    pollRef.current = setInterval(poll, 3000);
+    return () => clearInterval(pollRef.current);
+  }, [isViewer]);
+
+  useEffect(() => {
+    if (running) intervalRef.current = setInterval(() => {
+      setTimer(t => {
+        const newT = t + 1;
+        if (newT % 5 === 0) saveLiveState({ timer: newT });
+        return newT;
+      });
+    }, 1000);
     else clearInterval(intervalRef.current);
     return () => clearInterval(intervalRef.current);
   }, [running]);
 
   const startSession = () => {
     const now = Date.now();
-    setPlayers(prev => prev.map(p => p.active ? {...p, sessionStart:now, roleStart:now} : p));
+    const newPlayers = players.map(p => p.active ? {...p, sessionStart:now, roleStart:now} : p);
+    setPlayers(newPlayers);
     setRunning(true); setView("session"); setTimer(0);
-    setEvents([{ time:0, text:`${sessionType==="kamp"?"⚽ Kamp":"🏃 Trening"} startet!` }]);
+    const newEvents = [{ time:0, text:`${sessionType==="kamp"?"⚽ Kamp":"🏃 Trening"} startet!` }];
+    setEvents(newEvents);
+    setTimeout(() => db.set("live", { view:"session", timer:0, running:true, players:newPlayers, events:newEvents, notes:[], score, opponent, sessionType }), 100);
   };
 
   const pauseResume = () => {
@@ -586,9 +625,13 @@ function App() {
               </div>
             )}
           </div>
-          <div style={{padding:"0 16px 32px"}}>
+          <div style={{padding:"0 16px 32px", display:"flex", flexDirection:"column", gap:10}}>
             <button style={s.bigBtn} onClick={startSession}>
               {sessionType==="kamp"?"⚽ Start kamp":"🏃 Start trening"}
+            </button>
+            <button style={{...s.bigBtn, background:"#1e3a5f", color:"#93c5fd"}}
+              onClick={()=>setIsViewer(true)}>
+              👁 Se kamp live
             </button>
           </div>
         </>)}
@@ -699,6 +742,14 @@ function App() {
   // ---- SESSION ----
   return (
     <div style={s.page}>
+      {/* Viewer banner */}
+      {isViewer && (
+        <div style={{background:"#1e3a5f",color:"#93c5fd",padding:"8px 16px",fontSize:13,textAlign:"center"}}>
+          👁 Tilskuermodus — oppdateres live hvert 3. sek
+          <button style={{...s.smBtn,background:"#1e293b",color:"#94a3b8",marginLeft:12}}
+            onClick={()=>setIsViewer(false)}>Bytt til trener</button>
+        </div>
+      )}
       <div style={s.topBar}>
         <div>
           <div style={s.timerDisplay}>{fmt(timer)}</div>
@@ -709,27 +760,33 @@ function App() {
             <div style={s.scoreTeam}>
               <div style={s.scoreTeamLabel}>Hjemme</div>
               <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                <button style={s.scoreBtn} onClick={()=>setScore(sc=>({...sc,home:Math.max(0,sc.home-1)}))}>−</button>
+                {!isViewer && <button style={s.scoreBtn} onClick={()=>setScore(sc=>({...sc,home:Math.max(0,sc.home-1)}))}>−</button>}
                 <span style={s.scoreNum}>{score.home}</span>
-                <button style={s.scoreBtn} onClick={()=>setScore(sc=>({...sc,home:sc.home+1}))}>+</button>
+                {!isViewer && <button style={s.scoreBtn} onClick={()=>{ setScore(sc=>({...sc,home:sc.home+1})); saveLiveState({score:{...score,home:score.home+1}}); }}>+</button>}
               </div>
             </div>
             <span style={s.scoreDash}>–</span>
             <div style={s.scoreTeam}>
               <div style={s.scoreTeamLabel}>Borte</div>
               <div style={{display:"flex",gap:4,alignItems:"center"}}>
-                <button style={s.scoreBtn} onClick={()=>setScore(sc=>({...sc,away:Math.max(0,sc.away-1)}))}>−</button>
+                {!isViewer && <button style={s.scoreBtn} onClick={()=>setScore(sc=>({...sc,away:Math.max(0,sc.away-1)}))}>−</button>}
                 <span style={s.scoreNum}>{score.away}</span>
-                <button style={s.scoreBtn} onClick={()=>setScore(sc=>({...sc,away:sc.away+1}))}>+</button>
+                {!isViewer && <button style={s.scoreBtn} onClick={()=>{ setScore(sc=>({...sc,away:sc.away+1})); saveLiveState({score:{...score,away:score.away+1}}); }}>+</button>}
               </div>
             </div>
           </div>
         )}
         <div style={{display:"flex",flexDirection:"column",gap:6}}>
-          <button style={running?{...s.smBtn,...s.yellow}:{...s.smBtn,...s.green}} onClick={pauseResume}>
-            {running?"⏸":"▶️"}
-          </button>
-          <button style={{...s.smBtn,...s.red}} onClick={endSession}>🏁</button>
+          {!isViewer && <>
+            <button style={running?{...s.smBtn,...s.yellow}:{...s.smBtn,...s.green}} onClick={pauseResume}>
+              {running?"⏸":"▶️"}
+            </button>
+            <button style={{...s.smBtn,...s.red}} onClick={endSession}>🏁</button>
+          </>}
+          {!isViewer && (
+            <button style={{...s.smBtn,background:"#1e3a5f",color:"#93c5fd",fontSize:10}}
+              onClick={()=>setIsViewer(true)}>👁</button>
+          )}
         </div>
       </div>
 
