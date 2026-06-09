@@ -2,22 +2,37 @@
 <html lang="no">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
   <title>J11 Trener</title>
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #0f172a; font-family: system-ui, sans-serif; }
     select option { background: #1e293b; color: #f1f5f9; }
-    #loading { display:flex; align-items:center; justify-content:center; height:100vh; color:#10b981; font-size:18px; font-family:system-ui; }
+    #loading { display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:#10b981; font-size:18px; font-family:system-ui; gap:16px; }
+    #loading p { color: #64748b; font-size:14px; }
   </style>
 </head>
 <body>
-  <div id="root"><div id="loading">⚽ Laster J11 Trener...</div></div>
-  <script type="text/babel">
-const { useState, useEffect, useRef } = React;
+  <div id="root">
+    <div id="loading">
+      <div style="font-size:48px">⚽</div>
+      <div>Laster J11 Trener...</div>
+      <p>Første gang kan ta noen sekunder</p>
+    </div>
+  </div>
+  <script type="importmap">
+  {
+    "imports": {
+      "react": "https://esm.sh/react@18.2.0",
+      "react-dom/client": "https://esm.sh/react-dom@18.2.0/client"
+    }
+  }
+  </script>
+  <script type="module" src="https://esm.sh/tsx@4.7.0/browser"></script>
+  <script type="text/tsx">
+import { useState, useEffect, useRef } from "react";
+import { createRoot } from "react-dom/client";
+
 const SUPABASE_URL = "https://jowlnltfepmcbwrphkwv.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Impvd2xubHRmZXBtY2J3cnBoa3d2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwMjc5NDYsImV4cCI6MjA5NjYwMzk0Nn0.fj8ECv7rzpx_u3O0lNTwqs9zQJyIYmoDtcVIgbfjZaQ";
 const db = {
@@ -36,6 +51,7 @@ const db = {
     });
   }
 };
+
 
 // New positions with colour coding
 const ALL_POSITIONS = ["Keeper","V. Back","H. Back","V. Kant","H. Kant","Sentral midt","Angriper"];
@@ -980,7 +996,8 @@ const s = {
   roleDot: { width:8, height:8, borderRadius:"50%", flexShrink:0 },
   empty: { color:"#475569", fontSize:13, textAlign:"center", padding:"12px 0" },
 };
-ReactDOM.createRoot(document.getElementById('root')).render(
+
+createRoot(document.getElementById('root')).render(
   <React.StrictMode><App /></React.StrictMode>
 );
   </script>
