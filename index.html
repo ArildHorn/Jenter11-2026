@@ -235,7 +235,7 @@ function BenchPlayerRow({ p, subMode, doSub, onChangePosition }) {
 function App() {
   const [view, setView] = useState("setup");
   const [sessionType, setSessionType] = useState("kamp");
-  const [players, setPlayers] = useState([
+  const DEFAULT_PLAYERS = [
     { id:0,  name:"Spiller 1",  position:"Keeper",       active:true,  absent:false, borrowed:false, totalTime:0, sessionStart:null, roleTimes:{}, roleStart:null },
     { id:1,  name:"Spiller 2",  position:"V. Back",      active:true,  absent:false, borrowed:false, totalTime:0, sessionStart:null, roleTimes:{}, roleStart:null },
     { id:2,  name:"Spiller 3",  position:"H. Back",      active:true,  absent:false, borrowed:false, totalTime:0, sessionStart:null, roleTimes:{}, roleStart:null },
@@ -248,7 +248,17 @@ function App() {
     { id:9,  name:"Spiller 10", position:"H. Back",      active:false, absent:false, borrowed:false, totalTime:0, sessionStart:null, roleTimes:{}, roleStart:null },
     { id:10, name:"Spiller 11", position:"Angriper",     active:false, absent:false, borrowed:false, totalTime:0, sessionStart:null, roleTimes:{}, roleStart:null },
     { id:11, name:"Spiller 12", position:"V. Kant",      active:false, absent:false, borrowed:false, totalTime:0, sessionStart:null, roleTimes:{}, roleStart:null },
-  ]);
+  ];
+
+  const load = (key, fallback) => {
+    try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  };
+  const save = (key, value) => {
+    try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+  };
+
+  const [players, setPlayers] = useState(() => load("j11_players", DEFAULT_PLAYERS));
+  const [sessions, setSessions] = useState(() => load("j11_sessions", []));
   const [editingName, setEditingName] = useState(null);
   const [timer, setTimer] = useState(0);
   const [running, setRunning] = useState(false);
@@ -258,11 +268,14 @@ function App() {
   const [showNoteForm, setShowNoteForm] = useState(false);
   const [subMode, setSubMode] = useState(null);
   const [tab, setTab] = useState("spill");
-  const [sessions, setSessions] = useState([]);
   const [opponent, setOpponent] = useState("");
   const [score, setScore] = useState({ home:0, away:0 });
   const [setupTab, setSetupTab] = useState("ny");
   const intervalRef = useRef(null);
+
+  // Auto-save whenever players or sessions change
+  useEffect(() => { save("j11_players", players); }, [players]);
+  useEffect(() => { save("j11_sessions", sessions); }, [sessions]);
 
   useEffect(() => {
     if (running) intervalRef.current = setInterval(() => setTimer(t => t+1), 1000);
